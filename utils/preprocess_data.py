@@ -38,7 +38,7 @@ if missing:
     raise ValueError(f"Missing required columns in CSV: {missing}. Found columns: {list(df.columns)}")
 
 # Timestamp handling
-ts_col = df_cols.get("場次")
+ts_col = df_cols.get("timestamp")
 if ts_col is None:
     # Create strictly increasing timestamps if none provided
     df = df.reset_index(drop=False).rename(columns={"index": "__rowidx"})
