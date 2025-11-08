@@ -35,7 +35,7 @@ def concat_feather_files():
 
     print(f"找到 {len(file_list)} 個 Feather 檔案，開始讀取...")
 
-    dfs = [pd.read_feather(fp) for fp in file_list[0:20]]
+    dfs = [pd.read_feather(fp) for fp in file_list[0:10]]
     data = pd.concat(dfs, ignore_index=True)
     print(data.head().keys())
     print("資料合併完成！")

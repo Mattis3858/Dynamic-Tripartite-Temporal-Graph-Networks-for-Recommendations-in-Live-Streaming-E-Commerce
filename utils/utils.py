@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+from collections import defaultdict
 
 class MergeLayer(torch.nn.Module):
     def __init__(self, dim1, dim2, dim3, dim4):
@@ -87,6 +87,33 @@ class RandEdgeSampler(object):
     def reset_random_state(self):
         self.random_state = np.random.RandomState(self.seed)
 
+class BipartiteNegSampler:
+    """
+    專用於 user-item 二分圖的負採樣器：
+    - 節點編號規則需與 preprocess 對齊：user [1..U]，item [U+1..U+I]
+    - 只替換成 item 當作負樣本，且避開已存在 (u,i) 的真實邊
+    """
+    def __init__(self, n_users, n_items, ui_edges, user_offset=1):
+        self.U = n_users
+        self.I = n_items
+        self.item_ids = np.arange(user_offset + self.U, user_offset + self.U + self.I, dtype=int)
+        self.user2items = defaultdict(set)
+        self.rng = random.Random(2020)
+        for u, i in ui_edges:
+            self.user2items[u].add(i)
+
+    def sample_for_users(self, users, n_neg=1):
+        negs = []
+        for u in users:
+            picked = []
+            banned = self.user2items.get(u, set())
+            for _ in range(n_neg):
+                while True:
+                    cand = self.item_ids[self.rng.randrange(len(self.item_ids))]
+                    if cand not in banned:
+                        picked.append(cand); break
+            negs.append(picked[0] if n_neg == 1 else picked)
+        return np.array(users), np.array(negs)
 
 def get_neighbor_finder(data, uniform, max_node_idx=None):
     max_node_idx = (
