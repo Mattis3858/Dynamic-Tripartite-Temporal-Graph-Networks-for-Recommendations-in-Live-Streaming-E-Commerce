@@ -1,4 +1,5 @@
-# utils/preprocess_data.py  (Bipartite version: user-item only)
+# utils/preprocess_data_bipartite.py (Bipartite version: user-item only)
+# VERSIÓN 2.0 - Robust ID Mapping
 
 import pandas as pd
 import numpy as np
@@ -12,7 +13,7 @@ df_cols = {c.lower(): c for c in df.columns}
 # 必要欄位：user_id, item_id, ts
 user_col = df_cols.get("user_id")
 item_col = df_cols.get("item_id")
-ts_col   = df_cols.get("timestamp") or df_cols.get("ts")
+ts_col = df_cols.get("timestamp") or df_cols.get("ts")
 
 missing = [n for n, c in [("user_id", user_col), ("item_id", item_col)] if c is None]
 if missing:
@@ -27,7 +28,8 @@ else:
     if not np.issubdtype(df[ts_col].dtype, np.number):
         parsed = pd.to_datetime(df[ts_col], errors="coerce", utc=True)
         if parsed.isna().mean() < 0.5:
-            df["ts"] = parsed.view("int64") // 10**9
+            # FutureWarning: Series.view is deprecated. Use .astype('int64')
+            df["ts"] = parsed.astype('int64') // 10**9
             ts_col = "ts"
         else:
             df[ts_col] = pd.to_numeric(df[ts_col], errors="coerce")
@@ -43,24 +45,41 @@ else:
     df["label"] = pd.to_numeric(df[label_col], errors="coerce").fillna(1).astype(int)
     label_col = "label"
 
-# 只 mapping user / item，streamer 不再需要
-users = sorted(df[user_col].unique().tolist())
-items = sorted(df[item_col].unique().tolist())
-user2cid = {u: i for i, u in enumerate(users)}
-item2cid = {it: i for i, it in enumerate(items)}
+# ---------- [MODIFIED] ID Mapping (Robust Version) ----------
 
-# 連續節點空間：user [1..U]，item [U+1 .. U+I]（保留 0 pad）
+def build_id_map(series: pd.Series, name: str):
+    """Helper to create a stable mapping from original IDs to new contiguous IDs."""
+    # pd.Index preserves appearance order, handling mixed types without sorting
+    uniq = pd.Index(series.dropna().unique())
+    mapping = pd.DataFrame({name: uniq, f"{name}_cid": np.arange(len(uniq), dtype=int)})
+    return mapping
+
+users_map = build_id_map(df[user_col], "user_id")
+items_map = build_id_map(df[item_col], "item_id")
+
+# Merge mappings back to get the new contiguous IDs (_cid)
+tmp = df[[user_col, item_col, ts_col, label_col]].copy()
+tmp = tmp.merge(users_map, left_on=user_col, right_on="user_id", how="left")
+tmp = tmp.merge(items_map, left_on=item_col, right_on="item_id", how="left")
+
+# Filter out any rows where the merge failed (e.g., due to NaNs)
+tmp = tmp.dropna(subset=["user_id_cid", "item_id_cid"])
+
+# ---------- [MODIFIED] 連續節點空間 ----------
 USER_OFFSET = 1
-N_USERS = len(users)
-N_ITEMS = len(items)
+N_USERS = len(users_map)
+N_ITEMS = len(items_map)
 
-def uid_global(x): return USER_OFFSET + int(user2cid[x])
-def iid_global(x): return USER_OFFSET + N_USERS + int(item2cid[x])
+# Update functions to use the new _cid columns
+def uid_global(x): return USER_OFFSET + int(x)
+def iid_global(x): return USER_OFFSET + N_USERS + int(x)
 
 records = []
-for _, r in df.iterrows():
-    ug = uid_global(r[user_col])
-    ig = iid_global(r[item_col])
+# Iterate over the merged dataframe 'tmp'
+for _, r in tmp.iterrows():
+    # Use the _cid columns for mapping
+    ug = uid_global(r["user_id_cid"])
+    ig = iid_global(r["item_id_cid"])
     ts = float(r[ts_col])
     y  = int(r[label_col])
     records.append((ug, ig, ts, y))
@@ -86,8 +105,10 @@ Path("training_data").mkdir(parents=True, exist_ok=True)
 edges.to_csv(OUT_EDGES, index=False)
 np.save(OUT_EFEAT, edge_feat)
 np.save(OUT_NFEAT, node_feat)
-pd.DataFrame({"user_id": users, "user_id_cid": [user2cid[u] for u in users]}).to_csv(OUT_USERS, index=False)
-pd.DataFrame({"item_id": items, "item_id_cid": [item2cid[i] for i in items]}).to_csv(OUT_ITEMS, index=False)
+
+# Save the mapping files
+users_map.to_csv(OUT_USERS, index=False)
+items_map.to_csv(OUT_ITEMS, index=False)
 
 print(edges.head())
 print("\nSummary:",

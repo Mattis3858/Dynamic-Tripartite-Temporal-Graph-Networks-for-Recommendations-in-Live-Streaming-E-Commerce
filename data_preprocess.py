@@ -31,11 +31,11 @@ def concat_feather_files():
 
     data_dir = 'data/測試資料_feather/'
     pattern = os.path.join(data_dir, '銷售資料_*.feather')
-    file_list = glob.glob(pattern)
+    file_list = glob.glob(pattern)[0:50]
 
     print(f"找到 {len(file_list)} 個 Feather 檔案，開始讀取...")
 
-    dfs = [pd.read_feather(fp) for fp in file_list[0:10]]
+    dfs = [pd.read_feather(fp) for fp in file_list]
     data = pd.concat(dfs, ignore_index=True)
     print(data.head().keys())
     print("資料合併完成！")
