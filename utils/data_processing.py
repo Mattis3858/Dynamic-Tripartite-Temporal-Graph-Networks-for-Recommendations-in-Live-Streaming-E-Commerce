@@ -28,6 +28,17 @@ def _load_tripartite(dataset_name, base_dir="training_data"):
 
     return graph_df, node_features, edge_features
 
+def _load_bipartite(base_dir="training_data"):
+    graph_df = pd.read_csv(f"{base_dir}/ml_bipartite_edges.csv")
+    edge_features = np.load(f"{base_dir}/ml_bipartite_features.npy")
+    node_features = np.load(f"{base_dir}/ml_bipartite_node.npy")
+
+    required_cols = {"src", "dst", "ts", "label", "idx"}
+    missing = required_cols - set(graph_df.columns)
+    if missing:
+        raise ValueError(f"Missing columns in bipartite edges csv: {missing}")
+    return graph_df, node_features, edge_features
+
 
 def get_data_node_classification(
     dataset_name, use_validation=False, base_dir="training_data"
@@ -101,7 +112,12 @@ def get_data(
     randomize_features=False,
     base_dir="training_data",
 ):
-    graph_df, node_features, edge_features = _load_tripartite(dataset_name, base_dir=base_dir)
+    if dataset_name == "bipartite":
+        graph_df, node_features, edge_features = _load_bipartite(base_dir=base_dir)
+    else:
+        graph_df, node_features, edge_features = _load_tripartite(
+            dataset_name, base_dir=base_dir
+        )
 
     if randomize_features:
         node_features = np.random.rand(node_features.shape[0], node_features.shape[1])
