@@ -40,8 +40,8 @@ texts = df[COLUMN_TO_EMBED].fillna('').astype(str).tolist()
 print(f"正在為 {len(texts)} 筆資料產生 embeddings...")
 embeddings = model.encode(texts, show_progress_bar=True)
 print("Embeddings 產生完畢。")
-df['embedding'] = [emb.tolist() for emb in embeddings]
-print(len(df['embedding'][0]))
+df['item_embedding'] = [emb.tolist() for emb in embeddings]
+print(len(df['item_embedding'][0]))
 print(f"正在將結果儲存至: {OUTPUT_FILE} (Parquet 格式)...")
 try:
     df.to_parquet(OUTPUT_FILE, index=False, engine='pyarrow')

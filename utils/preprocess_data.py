@@ -1,34 +1,16 @@
-# Tripartite TGN-style preprocessing for your CSV at /mnt/data/cleaned_sales_data.csv
-# - Builds a single contiguous node ID space with disjoint offsets for users, streamers, and items
-# - Factorizes each (user, streamer, item, ts, label) row into 3 dyadic edges: U-I, U-S, S-I
-# - Produces:
-#   1) /mnt/data/ml_tripartite_edges.csv        (src, dst, ts, label, etype, idx)
-#   2) /mnt/data/ml_tripartite_features.npy     (edge features; first row is zeros as padding)
-#   3) /mnt/data/ml_tripartite_node.npy         (node features; zeros [n_nodes x 172])
-#   4) /mnt/data/id_maps_users.csv              (original->contiguous map)
-#   5) /mnt/data/id_maps_streamers.csv
-#   6) /mnt/data/id_maps_items.csv
-# 
-# Notes:
-# - If timestamp column is missing, we synthesize a strictly increasing integer ts.
-# - If label column is missing, defaults to 1.
-# - Accepts both 'streame_id' (typo) and 'streamer_id'.
-
-import pandas as pd
-import numpy as np
 import os
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
+import numpy as np
+import ast
 
-IN_PATH = "data/cleaned_sales_data.csv"
+IN_PATH = "data/cleaned_sales_data_with_embedding.parquet"
 
-# ---------- Load ----------
-df = pd.read_csv(IN_PATH)
+df = pd.read_parquet(IN_PATH)
 
-# Normalize column names (lowercase for matching)
 df_cols = {c.lower(): c for c in df.columns}
 
-# Required entity columns
 user_col = df_cols.get("user_id")
 streamer_col = df_cols.get("streamer_id")
 item_col = df_cols.get("item_id")
@@ -71,6 +53,17 @@ else:
     df["label"] = pd.to_numeric(df[label_col], errors="coerce").fillna(1).astype(int)
     label_col = "label"
 
+emb_col = df_cols.get("item_embedding")
+if emb_col is None:
+    raise ValueError("Missing 'item_embedding' column in parquet.")
+if isinstance(df[emb_col].iloc[0], str):
+    df[emb_col] = df[emb_col].apply(ast.literal_eval)
+
+first_emb = df[emb_col].iloc[0]
+if not isinstance(first_emb, (list, np.ndarray)):
+    raise ValueError(f"'item_embedding' must be list/ndarray per row, got {type(first_emb)}")
+embed_dim = len(first_emb)
+
 # ---------- Build ID maps per type ----------
 def build_id_map(series: pd.Series, name: str):
     uniq = pd.Index(series.unique())
@@ -83,7 +76,7 @@ streamers_map = build_id_map(df[streamer_col], "streamer_id")
 items_map = build_id_map(df[item_col], "item_id")
 
 # Merge to get contiguous ids
-tmp = df[[user_col, streamer_col, item_col, ts_col, label_col]].copy()
+tmp = df[[user_col, streamer_col, item_col, ts_col, label_col, emb_col]].copy()
 tmp = tmp.merge(users_map, left_on=user_col, right_on="user_id", how="left")
 tmp = tmp.merge(streamers_map, left_on=streamer_col, right_on="streamer_id", how="left", suffixes=("",""))
 tmp = tmp.merge(items_map, left_on=item_col, right_on="item_id", how="left", suffixes=("",""))
@@ -127,13 +120,23 @@ edges["idx"] = edges.index + 1  # 1-based like original script
 # Simple 1-hot edge-type features of length 3
 etype_eye = np.eye(3, dtype=float)
 edge_feat_rows = [etype_eye[e] for e in edges["etype"].to_numpy()]
-
-# Prepend zero row as padding (idx=0)
 edge_feat = np.vstack([np.zeros((1, 3), dtype=float), np.array(edge_feat_rows, dtype=float)])
 
 # ---------- Node features ----------
+item_emb_df = (
+    tmp.groupby("item_id_cid")[emb_col]
+    .apply(lambda x: np.mean(np.stack(x.values), axis=0))
+    .reset_index()
+    .rename(columns={emb_col: "item_embedding_vec"})
+)
 n_nodes = ITEM_OFFSET + n_items   # last index + 1 (since offsets started at 1)
+node_feat = np.zeros((n_nodes + 1, embed_dim), dtype=float)
 
+for _, row in item_emb_df.iterrows():
+    cid = int(row["item_id_cid"])
+    idx = ITEM_OFFSET + cid
+    vec = row["item_embedding_vec"]
+    node_feat[idx, :] = np.asarray(vec, dtype=float)
 #! change node_feat into corresponding embeddings:
 #* item embedding
     #* channel_name + item_name -> gemma3 -> qwen_embedding -> item_embedding
@@ -142,10 +145,8 @@ n_nodes = ITEM_OFFSET + n_items   # last index + 1 (since offsets started at 1)
 #* streamer embedding
     #* streamer sold history -> average or sum -> streamer_embedding
 
-
-node_feat = np.zeros((n_nodes + 1, 172), dtype=float)
-
 # ---------- Save ----------
+Path("training_data").mkdir(parents=True, exist_ok=True)
 OUT_EDGES = "training_data/ml_tripartite_edges.csv"
 OUT_EFEAT = "training_data/ml_tripartite_features.npy"
 OUT_NFEAT = "training_data/ml_tripartite_node.npy"
