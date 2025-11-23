@@ -44,7 +44,7 @@ def get_llm_answer(CHANNEL_NAME: str, item_name: str):
 def process_csv(csv_file_path: str, max_workers: int = 5) -> pd.DataFrame:
 
     try:
-        df = pd.read_csv(csv_file_path)[0:1000]
+        df = pd.read_csv(csv_file_path)[0:50000]
 
         required_cols = ["CHANNEL_NAME", "item_name"]
         if not all(col in df.columns for col in required_cols):
@@ -88,19 +88,26 @@ def process_csv(csv_file_path: str, max_workers: int = 5) -> pd.DataFrame:
                 try:
 
                     result_products_obj = future.result()
+                    # print(f"Debug Row {index}: {result_products_obj}") # 除錯用
 
-                    if (
-                        isinstance(result_products_obj, dict)
-                        and "items" in result_products_obj
-                        and result_products_obj["items"]
-                    ):
-                        first_item = result_products_obj["items"][0]
+                    if isinstance(result_products_obj, dict):
+                        if "clean_description" in result_products_obj:
+                             df.at[index, "predicted_category"] = result_products_obj.get("predicted_category", "")
+                             df.at[index, "clean_description"] = result_products_obj.get("clean_description", "")
+                             success_count += 1
+                        
+                        elif "items" in result_products_obj and isinstance(result_products_obj["items"], list) and len(result_products_obj["items"]) > 0:
+                            first_item = result_products_obj["items"][0]
+                            df.at[index, "predicted_category"] = first_item.get("predicted_category", "")
+                            df.at[index, "clean_description"] = first_item.get("clean_description", "")
+                            success_count += 1
+                        
+                        else:
+                            df.at[index, "processing_error"] = f"Unexpected format: {result_products_obj}"
+                            error_count += 1
 
-                        df.at[index, "predicted_category"] = first_item["predicted_category"]
-                        df.at[index, "clean_description"] = first_item["clean_description"]
-                        success_count += 1
                     else:
-                        df.at[index, "processing_error"] = "LLM returned no items"
+                        df.at[index, "processing_error"] = "LLM returned non-dict result"
                         error_count += 1
                 
                 except ValidationError as ve:
