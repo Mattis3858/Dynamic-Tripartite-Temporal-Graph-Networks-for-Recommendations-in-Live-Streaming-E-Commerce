@@ -48,11 +48,7 @@ class AttentionCell(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs, hidden):
-        # inputs (message): [batch_size, input_dim]
-        # hidden (memory):  [batch_size, hidden_dim]
-
-        # 投影輸入
-        inputs = self.input_proj(inputs)  # -> [batch, hidden_dim]
+        inputs = self.input_proj(inputs)
 
         # 調整形狀以符合 MultiheadAttention: [batch, seq_len=1, dim]
         query = hidden.unsqueeze(1)  # Memory 作為 Query

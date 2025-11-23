@@ -79,7 +79,7 @@ parser.add_argument(
     "--memory_updater",
     type=str,
     default="gru",
-    choices=["gru", "rnn"],
+    choices=["gru", "rnn", "attention"],
     help="Type of memory updater",
 )
 parser.add_argument(
