@@ -3,8 +3,10 @@ import pandas as pd
 from pydantic import ValidationError
 from pydantic import BaseModel
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
+import concurrent.futures
+from tqdm import tqdm
 from item_parsing_prompt.V1 import ITEM_PARSING_PROMPT
 
 load_dotenv()
@@ -39,10 +41,10 @@ def get_llm_answer(CHANNEL_NAME: str, item_name: str):
     result = parser.parse(response.content)
     return result
 
-def process_csv(csv_file_path: str):
+def process_csv(csv_file_path: str, max_workers: int = 5) -> pd.DataFrame:
 
     try:
-        df = pd.read_csv(csv_file_path)[0:10]
+        df = pd.read_csv(csv_file_path)[0:1000]
 
         required_cols = ["CHANNEL_NAME", "item_name"]
         if not all(col in df.columns for col in required_cols):
@@ -61,39 +63,54 @@ def process_csv(csv_file_path: str):
         success_count = 0
         error_count = 0
 
-        for index, row in df.iterrows():
-            channel_name = str(row["CHANNEL_NAME"]) if pd.notna(row["CHANNEL_NAME"]) else ""
-            item_name = str(row["item_name"]) if pd.notna(row["item_name"]) else ""
+        futures_to_index = {}
 
-            if not channel_name and not item_name:
-                print(f"--- 跳過第 {index + 1} 筆 (資料為空) ---")
-                df.at[index, "processing_error"] = "Skipped (Empty Data)"
-                continue
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            print(f"正在提交 {len(df)} 筆任務至 {max_workers} 個 workers...")
 
-            print(f"\n--- 正在處理第 {index + 1} 筆 ---")
-            print(f"CHANNEL_NAME: {channel_name}")
-            print(f"Item Name: {item_name}")
+            for index, row in df.iterrows():
+                channel_name = str(row["CHANNEL_NAME"]) if pd.notna(row["CHANNEL_NAME"]) else ""
+                item_name = str(row["item_name"]) if pd.notna(row["item_name"]) else ""
+
+                if not channel_name and not item_name:
+                    print(f"--- 跳過第 {index + 1} 筆 (資料為空) ---")
+                    df.at[index, "processing_error"] = "Skipped (Empty Data)"
+                    continue
+                future = executor.submit(get_llm_answer, channel_name, item_name)
+                futures_to_index[future] = index
+
+            print("任務提交完畢，開始處理...")
             
-            try:
-                result = get_llm_answer(channel_name, item_name)
+            for future in tqdm(concurrent.futures.as_completed(futures_to_index.keys()), total=len(futures_to_index), desc="Processing rows"):
+                
+                index = futures_to_index[future]
+                
+                try:
 
-                if result:
-                    df.at[index, "predicted_category"] = result['predicted_category']
-                    df.at[index, "clean_description"] = result['clean_description']
-                    success_count += 1
-                else:
-                    print("處理警告: LLM 未回傳有效的 item。")
-                    df.at[index, "processing_error"] = "LLM returned no items"
+                    result_products_obj = future.result()
+
+                    if (
+                        isinstance(result_products_obj, dict)
+                        and "items" in result_products_obj
+                        and result_products_obj["items"]
+                    ):
+                        first_item = result_products_obj["items"][0]
+
+                        df.at[index, "predicted_category"] = first_item["predicted_category"]
+                        df.at[index, "clean_description"] = first_item["clean_description"]
+                        success_count += 1
+                    else:
+                        df.at[index, "processing_error"] = "LLM returned no items"
+                        error_count += 1
+                
+                except ValidationError as ve:
+                    print(f"處理失敗 (第 {index + 1} 筆): LLM 回傳格式錯誤。 {ve}")
+                    df.at[index, "processing_error"] = f"Validation Error: {ve}"
                     error_count += 1
-            
-            except ValidationError as ve:
-                print(f"處理失敗 (第 {index + 1} 筆): LLM 回傳格式錯誤。 {ve}")
-                df.at[index, "processing_error"] = f"Validation Error: {ve}"
-                error_count += 1
-            except Exception as e:
-                print(f"處理失敗 (第 {index + 1} 筆): {e}")
-                df.at[index, "processing_error"] = str(e)
-                error_count += 1
+                except Exception as e:
+                    print(f"處理失敗 (第 {index + 1} 筆): {e}")
+                    df.at[index, "processing_error"] = str(e)
+                    error_count += 1
 
         print("\n=== 所有資料處理完成 ===")
         print(f"總結：成功 {success_count} 筆，失敗 {error_count} 筆。")
@@ -113,9 +130,11 @@ if __name__ == "__main__":
     INPUT_CSV = "data/cleaned_sales_data.csv"
     OUTPUT_CSV = "data/cleaned_sales_data_test.csv"
 
+    MAX_CONCURRENT_WORKERS = 10 
+
     print(f"開始處理檔案: {INPUT_CSV}")
     
-    processed_df = process_csv(INPUT_CSV)
+    processed_df = process_csv(INPUT_CSV, max_workers=MAX_CONCURRENT_WORKERS)
 
     if processed_df is not None:
         try:
