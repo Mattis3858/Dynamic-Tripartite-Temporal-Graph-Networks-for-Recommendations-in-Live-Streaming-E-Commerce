@@ -31,7 +31,7 @@ def concat_feather_files():
 
     data_dir = 'data/測試資料_feather/'
     pattern = os.path.join(data_dir, '銷售資料_*.feather')
-    file_list = glob.glob(pattern)[0:50]
+    file_list = glob.glob(pattern)
 
     print(f"找到 {len(file_list)} 個 Feather 檔案，開始讀取...")
 

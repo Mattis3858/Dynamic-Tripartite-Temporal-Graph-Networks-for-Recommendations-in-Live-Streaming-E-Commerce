@@ -44,7 +44,7 @@ def get_llm_answer(CHANNEL_NAME: str, item_name: str):
 def process_csv(csv_file_path: str, max_workers: int = 5) -> pd.DataFrame:
 
     try:
-        df = pd.read_csv(csv_file_path)[0:5000]
+        df = pd.read_csv(csv_file_path)
 
         required_cols = ["CHANNEL_NAME", "item_name"]
         if not all(col in df.columns for col in required_cols):
