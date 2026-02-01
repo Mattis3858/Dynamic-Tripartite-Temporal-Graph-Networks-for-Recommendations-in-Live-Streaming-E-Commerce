@@ -349,7 +349,7 @@ for i in range(args.n_runs):
             # validation on unseen nodes
             train_memory_backup = tgn.memory.backup_memory()
 
-        val_ap, val_auc = eval_edge_prediction(
+        val_ap, val_auc, val_pk, val_rk, val_ndcg = eval_edge_prediction(
             model=tgn,
             negative_edge_sampler=val_rand_sampler,
             data=val_data,
@@ -363,7 +363,7 @@ for i in range(args.n_runs):
             tgn.memory.restore_memory(train_memory_backup)
 
         # Validate on unseen nodes
-        nn_val_ap, nn_val_auc = eval_edge_prediction(
+        nn_val_ap, nn_val_auc, nn_val_pk, nn_val_rk, nn_val_ndcg = eval_edge_prediction(
             model=tgn,
             negative_edge_sampler=nn_val_rand_sampler,
             data=new_node_val_data,
@@ -397,6 +397,14 @@ for i in range(args.n_runs):
         logger.info("Epoch mean loss: {}".format(np.mean(m_loss)))
         logger.info("val auc: {}, new node val auc: {}".format(val_auc, nn_val_auc))
         logger.info("val ap: {}, new node val ap: {}".format(val_ap, nn_val_ap))
+        logger.info(
+            "val P@K: {}, R@K: {}, NDCG@K: {}".format(val_pk, val_rk, val_ndcg)
+        )
+        logger.info(
+            "new node val P@K: {}, R@K: {}, NDCG@K: {}".format(
+                nn_val_pk, nn_val_rk, nn_val_ndcg
+            )
+        )
 
         # Early stopping
         if early_stopper.early_stop_check(val_ap):
@@ -424,7 +432,7 @@ for i in range(args.n_runs):
 
     ### Test
     tgn.embedding_module.neighbor_finder = full_ngh_finder
-    test_ap, test_auc = eval_edge_prediction(
+    test_ap, test_auc, test_pk, test_rk, test_ndcg = eval_edge_prediction(
         model=tgn,
         negative_edge_sampler=test_rand_sampler,
         data=test_data,
@@ -435,7 +443,7 @@ for i in range(args.n_runs):
         tgn.memory.restore_memory(val_memory_backup)
 
     # Test on unseen nodes
-    nn_test_ap, nn_test_auc = eval_edge_prediction(
+    nn_test_ap, nn_test_auc, nn_test_pk, nn_test_rk, nn_test_ndcg = eval_edge_prediction(
         model=tgn,
         negative_edge_sampler=nn_test_rand_sampler,
         data=new_node_test_data,
@@ -443,10 +451,14 @@ for i in range(args.n_runs):
     )
 
     logger.info(
-        "Test statistics: Old nodes -- auc: {}, ap: {}".format(test_auc, test_ap)
+        "Test statistics: Old nodes -- auc: {}, ap: {}, P@K: {}, R@K: {}, NDCG@K: {}".format(
+            test_auc, test_ap, test_pk, test_rk, test_ndcg
+        )
     )
     logger.info(
-        "Test statistics: New nodes -- auc: {}, ap: {}".format(nn_test_auc, nn_test_ap)
+        "Test statistics: New nodes -- auc: {}, ap: {}, P@K: {}, R@K: {}, NDCG@K: {}".format(
+            nn_test_auc, nn_test_ap, nn_test_pk, nn_test_rk, nn_test_ndcg
+        )
     )
     # Save results for this run
     pickle.dump(
@@ -455,6 +467,14 @@ for i in range(args.n_runs):
             "new_nodes_val_aps": new_nodes_val_aps,
             "test_ap": test_ap,
             "new_node_test_ap": nn_test_ap,
+            "test_auc": test_auc,
+            "new_node_test_auc": nn_test_auc,
+            "test_precision_at_k": test_pk,
+            "test_recall_at_k": test_rk,
+            "test_ndcg_at_k": test_ndcg,
+            "new_node_test_precision_at_k": nn_test_pk,
+            "new_node_test_recall_at_k": nn_test_rk,
+            "new_node_test_ndcg_at_k": nn_test_ndcg,
             "epoch_times": epoch_times,
             "train_losses": train_losses,
             "total_epoch_times": total_epoch_times,
